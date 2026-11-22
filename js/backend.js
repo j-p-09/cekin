@@ -99,6 +99,9 @@ async function createFirebaseBackend(cfg) {
         if (p.disabled) { await A.signOut(auth); throw new BackendError("account-disabled"); }
         return p;
       }
+      // Skrbnik se ob prvi prijavi nastavi sam – pravila to dovolijo samo
+      // e-poštnemu naslovu skrbnika (zapisan je samo v pravilih baze, ne v kodi).
+      if (!(await isAdmin())) { try { await D.set(R(`admins/${uid()}`), true); } catch {} }
       if (await isAdmin()) {
         const profile = { email: auth.currentUser.email, name: "", currency: "EUR", onboarded: false, createdAt: Date.now(), lastActive: Date.now() };
         await D.set(R(`profiles/${uid()}`), profile);

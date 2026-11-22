@@ -53,16 +53,15 @@ cekin/requests/{uid}             zahteve za dostop
 cekin/data/{uid}/accounts|categories|transactions   finančni podatki, dostopni SAMO lastniku
 ```
 
-## 2. Ustvari skrbnika (samo v Firebase Console, nikjer v kodi)
+## 2. Skrbnik
 
-1. **Authentication → Users → Add user** → e-pošta in geslo skrbnika. (Če račun v projektu že imaš,
-   uporabi obstoječega.) Kopiraj njegov **User UID**.
-2. **Realtime Database → Data** → pri korenu klikni **+** → ključ `cekin` → znotraj **+** ključ `admins`
-   → znotraj **+** ključ = *prilepljen UID*, vrednost = `true` → **Add**.
-   Rezultat: `cekin/admins/<UID>: true`
-3. Prijavi se v aplikacijo. V **Nastavitvah** se pojavi **Skrbniška plošča**.
+Skrbnik je e-poštni naslov, zapisan v `database.rules.json` (samo v pravilih baze, ne v kodi aplikacije).
 
-Zapisa `cekin/admins` iz aplikacije ni mogoče spreminjati, zato skrbnika ni mogoče »prevzeti«.
+1. **Authentication → Users → Add user** → ta e-poštni naslov + geslo.
+2. Prijavi se v aplikacijo. Ob prvi prijavi se samodejno zapiše `cekin/admins/<UID>: true`
+   in v **Nastavitvah** se pojavi **Skrbniška plošča**.
+
+Drug skrbnik: dodaj ga ročno v bazo kot `cekin/admins/<UID>: true`.
 
 ## 3. Uporabniki (registracije ni)
 

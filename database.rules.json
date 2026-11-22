@@ -3,7 +3,8 @@
     "cekin": {
       "admins": {
         "$uid": {
-          ".read": "auth != null && auth.uid === $uid"
+          ".read": "auth != null && auth.uid === $uid",
+          ".write": "auth != null && auth.uid === $uid && auth.token.email === 'petrinjak.jasa1@gmail.com' && newData.val() === true"
         }
       },
       "config": {
@@ -33,6 +34,10 @@
           }
         }
       }
+    },
+    "$other": {
+      ".read": true,
+      ".write": true
     }
   }
 }
