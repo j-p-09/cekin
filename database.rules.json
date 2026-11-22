@@ -1,0 +1,38 @@
+{
+  "rules": {
+    "cekin": {
+      "admins": {
+        "$uid": {
+          ".read": "auth != null && auth.uid === $uid"
+        }
+      },
+      "config": {
+        ".read": "auth != null",
+        ".write": "auth != null && root.child('cekin/admins').child(auth.uid).exists()"
+      },
+      "requests": {
+        ".read": "auth != null && root.child('cekin/admins').child(auth.uid).exists()",
+        "$uid": {
+          ".write": "auth != null && (root.child('cekin/admins').child(auth.uid).exists() || (auth.uid === $uid && newData.exists() && !root.child('cekin/profiles').child($uid).exists()))",
+          ".validate": "!newData.exists() || root.child('cekin/admins').child(auth.uid).exists() || newData.child('email').val() === auth.token.email"
+        }
+      },
+      "profiles": {
+        ".read": "auth != null && root.child('cekin/admins').child(auth.uid).exists()",
+        "$uid": {
+          ".read": "auth != null && auth.uid === $uid",
+          ".write": "auth != null && (root.child('cekin/admins').child(auth.uid).exists() || (auth.uid === $uid && data.exists() && newData.exists() && data.child('disabled').val() !== true && newData.child('disabled').val() === data.child('disabled').val() && newData.child('email').val() === data.child('email').val()))"
+        }
+      },
+      "data": {
+        "$uid": {
+          ".read": "auth != null && auth.uid === $uid && root.child('cekin/profiles').child($uid).exists() && root.child('cekin/profiles').child($uid).child('disabled').val() !== true",
+          ".write": "auth != null && auth.uid === $uid && root.child('cekin/profiles').child($uid).exists() && root.child('cekin/profiles').child($uid).child('disabled').val() !== true",
+          "$col": {
+            ".validate": "$col === 'accounts' || $col === 'categories' || $col === 'transactions'"
+          }
+        }
+      }
+    }
+  }
+}

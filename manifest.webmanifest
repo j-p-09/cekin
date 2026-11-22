@@ -1,0 +1,24 @@
+{
+  "id": "./?app=cekin",
+  "name": "Cekin – osebne finance",
+  "short_name": "Cekin",
+  "description": "Sledenje financam, naročninam in proračunom.",
+  "lang": "sl",
+  "start_url": "./?source=pwa",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0A0D14",
+  "theme_color": "#0A0D14",
+  "categories": ["finance", "productivity"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "Transakcije", "url": "./#/transactions", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Statistika", "url": "./#/stats", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
