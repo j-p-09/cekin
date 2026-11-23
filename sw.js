@@ -1,7 +1,7 @@
 // Cekin – service worker
 // Predpomnilnik ima unikatno predpono "cekin-", zato ne posega v druge
 // aplikacije na isti domeni. Ob novi verziji spremeni VERSION.
-const VERSION = "1.1.0";
+const VERSION = "1.3.0";
 const CACHE = `cekin-${VERSION}`;
 const SHELL = [
   "./", "./index.html", "./manifest.webmanifest", "./css/app.css",

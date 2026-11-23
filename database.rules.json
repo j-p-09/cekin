@@ -30,7 +30,7 @@
           ".read": "auth != null && auth.uid === $uid && root.child('cekin/profiles').child($uid).exists() && root.child('cekin/profiles').child($uid).child('disabled').val() !== true",
           ".write": "auth != null && auth.uid === $uid && root.child('cekin/profiles').child($uid).exists() && root.child('cekin/profiles').child($uid).child('disabled').val() !== true",
           "$col": {
-            ".validate": "$col === 'accounts' || $col === 'categories' || $col === 'transactions'"
+            ".validate": "$col === 'accounts' || $col === 'categories' || $col === 'transactions' || $col === 'settings'"
           }
         }
       }

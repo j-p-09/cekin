@@ -125,7 +125,12 @@ dobijo novo različico.
 
 - **Domov:** trenutno stanje (vsota virov), prihodki/odhodki meseca, primerjava s prejšnjim mesecem,
   viri financ, opozorila proračuna, prihajajoče naročnine, zadnje 3 transakcije + *Poglej več*.
-- **Oko** skrije vse zneske (zvezdice) – za javna mesta; nastavitev se zapomni.
+- **Oko** skrije stanje (skupno stanje, viri, premoženje) in vse prihodke; odhodki ostanejo vidni.
+  Skrivanje je takojšnje, **prikaz zahteva PIN ali biometrijo**.
+- **PIN** (4 ali 6 števk) je obvezen; nastavi se ob prvi prijavi, spremeni v Nastavitvah → Varnost.
+  Po 5 napačnih poskusih se vnos zaklene za 60 s. Pozabljen PIN ponastaviš z geslom računa.
+  PIN je shranjen samo kot zgoščena vrednost (PBKDF2) v `cekin/data/<uid>/settings` – vidi ga samo lastnik.
+- **Face ID / prstni odtis / Windows Hello** (WebAuthn): vklopiš ga posebej na vsaki napravi.
 - **Gumb +** (vedno spodaj desno): odhodek, prihodek ali **prenos med viri**; datum v prihodnosti = *načrtovano*.
 - **Transakcije:** iskanje, filtri po vrsti, mesecu, viru in kategoriji, dnevni seštevki, izvoz CSV.
 - **Kategorije:** odhodki in prihodki, ikona in barva, **mesečni proračun** z vrstico napredka,
