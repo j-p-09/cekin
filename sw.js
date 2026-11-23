@@ -1,7 +1,7 @@
 // Cekin – service worker
 // Predpomnilnik ima unikatno predpono "cekin-", zato ne posega v druge
 // aplikacije na isti domeni. Ob novi verziji spremeni VERSION.
-const VERSION = "1.3.0";
+const VERSION = "1.3.1";
 const CACHE = `cekin-${VERSION}`;
 const SHELL = [
   "./", "./index.html", "./manifest.webmanifest", "./css/app.css",
@@ -29,8 +29,9 @@ self.addEventListener("fetch", (e) => {
 
   // Lastne datoteke: najprej omrežje (sveže), ob izpadu predpomnilnik
   if (url.origin === location.origin && url.pathname.startsWith(scope.pathname)) {
+    // cache: "no-cache" → vedno preveri pri strežniku (GitHub Pages sicer drži staro verzijo do 10 min)
     e.respondWith(
-      fetch(req).then((res) => {
+      fetch(req.url, { cache: "no-cache", credentials: "same-origin" }).then((res) => {
         if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
         return res;
       }).catch(() => caches.match(req, { ignoreSearch: true }).then((r) => r || caches.match("./index.html")))

@@ -353,3 +353,28 @@ input:focus, select:focus, textarea:focus { border-color: var(--gold); box-shado
 .kv b { text-align: right; margin-left: 12px; min-width: 0; overflow-wrap: anywhere; }
 .auth-note { margin: 16px 0 0; }
 .user-row .badge { flex: none; }
+
+/* ── PIN ─────────────────────────── */
+.pin-screen { max-width: 420px; margin: 0 auto; min-height: 100dvh; display: flex; flex-direction: column; justify-content: center; padding: calc(20px + env(safe-area-inset-top, 0px)) 20px calc(20px + var(--safe-b)); }
+.pin-top { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 18px; font-size: 18px; }
+.pin-note { margin-top: 18px; }
+.pin-len { max-width: 260px; margin: 0 auto 8px; }
+.pinpad { display: flex; flex-direction: column; align-items: center; }
+.pin-head { text-align: center; margin: 6px 0 18px; }
+.pin-head .bubble { margin: 0 auto 12px; }
+.pin-head h2 { font-size: 21px; margin-bottom: 4px; }
+.pin-head p { margin: 0; font-size: 14px; }
+.pin-dots { display: flex; gap: 14px; margin-bottom: 6px; }
+.pin-dots i { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--line-2); transition: background .12s, border-color .12s, transform .12s; }
+.pin-dots i.on { background: var(--gold); border-color: var(--gold); transform: scale(1.1); }
+.pin-dots.shake { animation: shake .4s; }
+.pin-dots.shake i { border-color: var(--neg); }
+@keyframes shake { 20%, 60% { transform: translateX(-9px); } 40%, 80% { transform: translateX(9px); } }
+.pin-err { min-height: 20px; color: var(--neg); font-size: 13px; font-weight: 600; text-align: center; margin: 6px 0 10px; }
+.keys { display: grid; grid-template-columns: repeat(3, 76px); gap: 12px 22px; justify-content: center; }
+.keys button { width: 76px; height: 76px; border-radius: 50%; font-size: 28px; font-weight: 600; background: var(--bg-2); border: 1px solid var(--line); display: grid; place-items: center; transition: background .1s, transform .08s; font-variant-numeric: tabular-nums; }
+.keys button:active { transform: scale(.93); background: color-mix(in srgb, var(--gold) 22%, var(--bg-2)); }
+.keys button.kfn { background: none; border: 0; color: var(--ink-2); }
+.keys button[data-bio] { color: var(--gold); }
+.pinpad .link { margin-top: 18px; }
+@media (max-height: 700px) { .keys { grid-template-columns: repeat(3, 66px); gap: 10px 18px; } .keys button { width: 66px; height: 66px; font-size: 24px; } .pin-head .bubble { display: none; } }

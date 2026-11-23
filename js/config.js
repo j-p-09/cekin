@@ -16,4 +16,4 @@ export const FIREBASE_CONFIG = {
 };
 
 export const APP_NAME = "Cekin";
-export const APP_VERSION = "1.1.0";
+export const APP_VERSION = "1.3.1";

@@ -128,6 +128,13 @@ async function createFirebaseBackend(cfg) {
       }
     },
     deleteAll: () => D.remove(R(`data/${uid()}`)),
+    // Zasebne nastavitve (npr. PIN) – dostopne samo lastniku, ne skrbniku
+    getSecure: async () => { try { return (await val(`data/${uid()}/settings`)) || {}; } catch { return {}; } },
+    setSecure: (patch) => D.update(R(`data/${uid()}/settings`), clean(patch)),
+    verifyPassword: wrap(async (pw) => {
+      const u = auth.currentUser;
+      await A.reauthenticateWithCredential(u, A.EmailAuthProvider.credential(u.email, pw));
+    }),
 
     getConfig: async () => { try { return (await val("config/app")) || {}; } catch { return {}; } },
     setConfig: wrap((patch) => D.update(R("config/app"), clean(patch))),
@@ -228,7 +235,13 @@ function createLocalBackend() {
     async put(col, o) { const d = data(); d[col][o.id] = o; save(d); },
     async del(col, id) { const d = data(); delete d[col][id]; save(d); },
     async putMany(col, arr) { const d = data(); arr.forEach((o) => (d[col][o.id] = o)); save(d); },
-    async deleteAll() { const d = data(); COLS.forEach((c) => (d[c] = {})); save(d); },
+    async deleteAll() { const d = data(); COLS.forEach((c) => (d[c] = {})); d.settings = {}; save(d); },
+    async getSecure() { return data().settings || {}; },
+    async setSecure(p) { const d = data(); d.settings = { ...(d.settings || {}), ...p }; save(d); },
+    async verifyPassword(pw) {
+      const u = read("users", {})[current.email];
+      if ((await hash(pw, u.salt)) !== u.hash) fail("auth/invalid-credential");
+    },
     async getConfig() { return {}; },
     async setConfig() {},
     async listUsers() { return []; },

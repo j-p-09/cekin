@@ -67,21 +67,36 @@ function fmtDate(iso, long = false) {
   return new Intl.DateTimeFormat("sl-SI", long ? { weekday: "long", day: "numeric", month: "long" } : { day: "numeric", month: "short" }).format(parseISO(iso));
 }
 const currency = () => S.profile?.currency || "EUR";
-function money(c, { sign = false, hide = S.hide } = {}) {
+// Zapis zneska: 1.500,00 € (ločilo tisočic je vedno pika, tudi pri štirimestnih številih)
+const symCache = {};
+function currencySymbol(cur) {
+  if (!symCache[cur]) {
+    try { symCache[cur] = new Intl.NumberFormat("sl-SI", { style: "currency", currency: cur }).formatToParts(0).find((p) => p.type === "currency")?.value || cur; }
+    catch { symCache[cur] = cur; }
+  }
+  return symCache[cur];
+}
+function money(c, { sign = false, hide = false } = {}) {
   if (hide) return "∗∗∗∗∗";
-  const s = new Intl.NumberFormat("sl-SI", { style: "currency", currency: currency() }).format(Math.abs(c || 0) / 100);
+  const abs = Math.abs(Math.round(c || 0));
+  const int = String(Math.floor(abs / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  const s = `${int},${String(abs % 100).padStart(2, "0")} ${currencySymbol(currency())}`;
   if (c < 0) return "−" + s;
   if (sign && c > 0) return "+" + s;
   return s;
 }
 function parseAmount(v) {
   let s = String(v ?? "").replace(/\s|€/g, "");
-  if (s.includes(",") && s.includes(".")) s = s.replace(/\./g, "");
+  if (s.includes(",") || /^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, ""); // pika = ločilo tisočic
   s = s.replace(",", ".");
   const n = parseFloat(s);
   return isFinite(n) ? Math.round(n * 100) : NaN;
 }
-const amountInput = (c) => (c ? (c / 100).toFixed(2).replace(".", ",") : "");
+// Stanje premoženja (skupno stanje, viri) – to skrije gumb z očesom; transakcije ostanejo vidne.
+const wealth = (c) => money(c, { hide: S.hide });
+// Prihodki se ob skritem stanju prav tako skrijejo; odhodki ostanejo vidni.
+const priv = (c, o = {}) => money(c, { ...o, hide: S.hide });
+const amountInput = (c) => (c ? money(c).replace(/\s\S+$/, "").replace("−", "-") : "");
 const persist = (p) => Promise.resolve(p).catch((e) => toast(errorText(e), "error"));
 const greeting = () => { const h = new Date().getHours(); return h < 10 ? "Dobro jutro" : h < 18 ? "Dober dan" : "Dober večer"; };
 
@@ -254,8 +269,8 @@ async function boot() {
     renderSplash();
     try {
       S.profile = await S.be.ensureProfile();
-      const [data, isAdmin, config] = await Promise.all([S.be.loadAll(), S.be.isAdmin(), S.be.getConfig()]);
-      Object.assign(S, data, { isAdmin, config });
+      const [data, isAdmin, config, secure] = await Promise.all([S.be.loadAll(), S.be.isAdmin(), S.be.getConfig(), S.be.getSecure()]);
+      Object.assign(S, data, { isAdmin, config, secure: secure || {} });
       if (S.profile.theme) { LS.set("theme", S.profile.theme); applyTheme(S.profile.theme); }
       persist(S.be.setProfile({ lastActive: Date.now() }));
       S.booting = false;
@@ -437,6 +452,7 @@ const TABS = [
 function route() {
   if (!S.user || !S.profile || S.booting) return;
   if (!S.profile.onboarded) return renderOnboarding();
+  if (!S.secure?.pin) return renderPinSetup();
   let r = (location.hash.replace(/^#\/?/, "") || "home").split("?")[0];
   const views = { home: viewHome, transactions: viewTransactions, stats: viewStats, categories: viewCategories, accounts: viewAccounts, settings: viewSettings, admin: viewAdmin };
   if (!views[r] || (r === "admin" && !S.isAdmin)) r = "home";
@@ -474,11 +490,11 @@ function txRow(t) {
     ic = "arrow-left-right"; color = "#64748B"; title = "Prenos";
     sub = `${esc(a?.name || "?")} → ${esc(acc(t.toAccountId)?.name || "?")}`; amt = money(t.amount); cls = "neutral";
   } else if (t.type === "adjust") {
-    ic = "scale"; color = "#64748B"; title = "Popravek stanja"; sub = esc(a?.name || ""); amt = money(t.amount, { sign: true }); cls = t.amount >= 0 ? "pos" : "neg";
+    ic = "scale"; color = "#64748B"; title = "Popravek stanja"; sub = esc(a?.name || ""); amt = priv(t.amount, { sign: true }); cls = t.amount >= 0 ? "pos" : "neg";
   } else {
     ic = c?.icon || "circle-dollar-sign"; color = c?.color || "#94A3B8"; title = esc(c?.name || "Brez kategorije");
     sub = esc(a?.name || "");
-    amt = money(t.type === "income" ? t.amount : -t.amount, { sign: true }); cls = t.type === "income" ? "pos" : "neg";
+    amt = t.type === "income" ? priv(t.amount, { sign: true }) : money(-t.amount, { sign: true }); cls = t.type === "income" ? "pos" : "neg";
   }
   const note = t.note ? `<span class="dot">·</span>${esc(t.note)}` : "";
   const future = t.date > todayISO() ? `<span class="badge">načrtovano</span>` : "";
@@ -513,11 +529,11 @@ function viewHome() {
   ${notice ? `<div class="banner gold">${icon("megaphone", 18)}<span>${esc(notice)}</span><button class="icon-btn sm" data-notice aria-label="Skrij">${icon("x", 16)}</button></div>` : ""}
 
   <section class="hero">
-    <div class="hero-top"><span>Trenutno stanje</span><button class="icon-btn sm glass" data-hide aria-label="Skrij zneske">${icon(S.hide ? "eye-off" : "eye", 18)}</button></div>
-    <div class="hero-amt">${money(total)}</div>
-    <div class="hero-sub">${monthLabel(mk, { month: "long" })}${expDelta !== null && !S.hide ? ` · poraba ${expDelta > 0 ? "+" : ""}${expDelta} % glede na prejšnji mesec` : ""}</div>
+    <div class="hero-top"><span>Trenutno stanje</span><button class="icon-btn sm glass" data-hide aria-label="Skrij stanje">${icon(S.hide ? "eye-off" : "eye", 18)}</button></div>
+    <div class="hero-amt">${wealth(total)}</div>
+    <div class="hero-sub">${monthLabel(mk, { month: "long" })}${expDelta !== null ? ` · poraba ${expDelta > 0 ? "+" : ""}${expDelta} % glede na prejšnji mesec` : ""}</div>
     <div class="hero-row">
-      <div class="pill in"><span class="pi">${icon("arrow-down-left", 16)}</span><div><small>Prihodki</small><b>${money(m.income)}</b></div></div>
+      <div class="pill in"><span class="pi">${icon("arrow-down-left", 16)}</span><div><small>Prihodki</small><b>${priv(m.income)}</b></div></div>
       <div class="pill out"><span class="pi">${icon("arrow-up-right", 16)}</span><div><small>Odhodki</small><b>${money(m.expense)}</b></div></div>
     </div>
   </section>
@@ -527,7 +543,7 @@ function viewHome() {
     <div class="acc-scroll">${accs.map((a) => `
       <a class="acc-card" href="#/accounts" style="--c:${a.color || "#F5B83D"}">
         <span class="bubble">${icon(ACC_TYPES[a.type]?.icon || "wallet", 18)}</span>
-        <small>${esc(a.name)}</small><b>${money(b[a.id] || 0)}</b>
+        <small>${esc(a.name)}</small><b>${wealth(b[a.id] || 0)}</b>
       </a>`).join("")}
       <button class="acc-card add" data-add-acc>${icon("plus", 20)}<small>Nov vir</small></button>
     </div>
@@ -543,7 +559,7 @@ function viewHome() {
     <div class="card list">${up.map(({ c, date }) => `
       <div class="row"><span class="bubble sm" style="--c:${c.color}">${icon(c.icon, 16)}</span>
       <span class="grow"><b>${esc(c.name)}</b><small class="muted">${fmtDate(date, true)} · ${esc(acc(c.recurring.accountId)?.name || "")}</small></span>
-      <b class="${c.type === "income" ? "pos" : "neg"}">${money(c.type === "income" ? c.recurring.amount : -c.recurring.amount, { sign: true })}</b></div>`).join("")}
+      <b class="${c.type === "income" ? "pos" : "neg"}">${c.type === "income" ? priv(c.recurring.amount, { sign: true }) : money(-c.recurring.amount, { sign: true })}</b></div>`).join("")}
     </div></section>` : ""}
 
   <section class="sec">
@@ -555,7 +571,7 @@ function viewHome() {
 }
 bind.home = (v) => {
   bindTxRows(v);
-  $("[data-hide]", v).onclick = () => { S.hide = !S.hide; LS.set("hide", S.hide); rerender(); };
+  $("[data-hide]", v).onclick = toggleHide;
   $("[data-notice]", v)?.addEventListener("click", () => { LS.set("noticeSeen", S.config.notice); rerender(); });
   $("[data-add-acc]", v).onclick = () => accountSheet();
 };
@@ -592,9 +608,9 @@ function viewTransactions() {
     <label class="select-pill">${icon("wallet", 16)}<select data-f="account"><option value="all">Vsi viri</option>${S.accounts.map((a) => `<option value="${a.id}" ${f.account === a.id ? "selected" : ""}>${esc(a.name)}</option>`).join("")}</select></label>
     <label class="select-pill">${icon("tag", 16)}<select data-f="category"><option value="all">Vse kategorije</option>${S.categories.map((c) => `<option value="${c.id}" ${f.category === c.id ? "selected" : ""}>${esc(c.name)} (${c.type === "income" ? "prihodek" : "odhodek"})</option>`).join("")}</select></label>
   </div>
-  <div class="sum-strip"><span>${list.length} transakcij</span><span class="pos">${money(inc, { sign: true })}</span><span class="neg">${money(-exp)}</span></div>
+  <div class="sum-strip"><span>${list.length} transakcij</span><span class="pos">${priv(inc, { sign: true })}</span><span class="neg">${money(-exp)}</span></div>
   ${list.length ? Object.entries(groups).map(([d, ts]) => {
-    const day = ts.reduce((s, t) => s + (t.type === "income" ? t.amount : t.type === "expense" ? -t.amount : 0), 0);
+    const day = ts.reduce((s, t) => s + (t.type === "income" && !S.hide ? t.amount : t.type === "expense" ? -t.amount : 0), 0);
     return `<div class="day-h"><span>${fmtDate(d, true)}</span><span class="${day >= 0 ? "pos" : "neg"}">${day ? money(day, { sign: true }) : ""}</span></div><div class="card list">${ts.map(txRow).join("")}</div>`;
   }).join("") : emptyState("search", "Ni zadetkov", "Poskusi spremeniti iskanje ali filtre.")}`;
 }
@@ -708,14 +724,14 @@ function donut(parts, total, label) {
 function barChart(mk) {
   const months = Array.from({ length: 6 }, (_, i) => addMonths(mk, i - 5));
   const data = months.map((m) => monthTotals(m));
-  const max = Math.max(1, ...data.flatMap((d) => [d.income, d.expense]));
+  const max = Math.max(1, ...data.flatMap((d) => (S.hide ? [d.expense] : [d.income, d.expense])));
   const W = 320, H = 150, bw = 14, gw = W / 6;
   return `<svg viewBox="0 0 ${W} ${H + 22}" class="bars">
     ${[0.25, 0.5, 0.75, 1].map((g) => `<line x1="0" x2="${W}" y1="${H - g * H}" y2="${H - g * H}" class="grid"/>`).join("")}
     ${data.map((d, i) => {
       const x = i * gw + gw / 2; const hi = (d.income / max) * (H - 6); const he = (d.expense / max) * (H - 6);
-      return `<rect x="${x - bw - 1}" y="${H - hi}" width="${bw}" height="${hi}" rx="4" class="b-in"><title>Prihodki: ${money(d.income, { hide: false })}</title></rect>
-        <rect x="${x + 1}" y="${H - he}" width="${bw}" height="${he}" rx="4" class="b-out"><title>Odhodki: ${money(d.expense, { hide: false })}</title></rect>
+      return `${S.hide ? "" : `<rect x="${x - bw - 1}" y="${H - hi}" width="${bw}" height="${hi}" rx="4" class="b-in"><title>Prihodki: ${money(d.income)}</title></rect>`}
+        <rect x="${S.hide ? x - bw / 2 : x + 1}" y="${H - he}" width="${bw}" height="${he}" rx="4" class="b-out"><title>Odhodki: ${money(d.expense, { hide: false })}</title></rect>
         <text x="${x}" y="${H + 16}" text-anchor="middle" class="ax ${months[i] === mk ? "cur" : ""}">${monthLabel(months[i], { month: "short" }).replace(".", "")}</text>`;
     }).join("")}
   </svg>`;
@@ -758,10 +774,10 @@ function viewStats() {
     <button class="icon-btn" data-m="1" ${isCur ? "disabled" : ""} aria-label="Naslednji mesec">${icon("chevron-right")}</button>
   </div>
   <div class="kpis">
-    <div class="kpi"><span class="ki in">${icon("trending-up", 18)}</span><small>Prihodki</small><b class="pos">${money(m.income)}</b></div>
+    <div class="kpi"><span class="ki in">${icon("trending-up", 18)}</span><small>Prihodki</small><b class="pos">${priv(m.income)}</b></div>
     <div class="kpi"><span class="ki out">${icon("trending-down", 18)}</span><small>Odhodki</small><b class="neg">${money(m.expense)}</b></div>
-    <div class="kpi"><span class="ki">${icon("scale", 18)}</span><small>Neto</small><b class="${m.net >= 0 ? "pos" : "neg"}">${money(m.net, { sign: true })}</b></div>
-    <div class="kpi"><span class="ki gold">${icon("piggy-bank", 18)}</span><small>Stopnja varčevanja</small><b>${rate === null ? "—" : rate + " %"}</b></div>
+    <div class="kpi"><span class="ki">${icon("scale", 18)}</span><small>Neto</small><b class="${S.hide ? "" : m.net >= 0 ? "pos" : "neg"}">${priv(m.net, { sign: true })}</b></div>
+    <div class="kpi"><span class="ki gold">${icon("piggy-bank", 18)}</span><small>Stopnja varčevanja</small><b>${S.hide ? "∗∗∗" : rate === null ? "—" : rate + " %"}</b></div>
     <div class="kpi"><span class="ki">${icon("calendar", 18)}</span><small>Povprečno na dan</small><b>${money(Math.round(m.expense / days))}</b></div>
     <div class="kpi"><span class="ki">${icon("repeat", 18)}</span><small>Naročnine / mesec</small><b>${money(subs)}</b></div>
   </div>
@@ -770,7 +786,7 @@ function viewStats() {
     <div class="sec-h"><h2>Po kategorijah</h2>
       <div class="seg xs"><button class="${type === "expense" ? "on" : ""}" data-st="expense">Odhodki</button><button class="${type === "income" ? "on" : ""}" data-st="income">Prihodki</button></div>
     </div>
-    ${total ? `<div class="donut-wrap">${donut(parts, total, type === "expense" ? "Porabljeno" : "Prejeto")}</div>
+    ${type === "income" && S.hide ? emptyState("eye-off", "Prihodki so skriti", "Prikaži jih z gumbom oko na domači strani.") : total ? `<div class="donut-wrap">${donut(parts, total, type === "expense" ? "Porabljeno" : "Prejeto")}</div>
     <div class="legend">${parts.map((p) => {
       const pct = Math.round((p.value / total) * 100); const budget = type === "expense" && p.c?.budget;
       return `<div class="lg-row"><span class="bubble sm" style="--c:${p.color}">${icon(p.icon, 16)}</span>
@@ -780,12 +796,12 @@ function viewStats() {
   </section>
 
   <section class="card pad">
-    <div class="sec-h"><h2>Zadnjih 6 mesecev</h2><div class="lg-mini"><i class="in"></i>Prihodki <i class="out"></i>Odhodki</div></div>
-    ${S.hide ? `<p class="muted center">Zneski so skriti.</p>` : barChart(mk)}
+    <div class="sec-h"><h2>Zadnjih 6 mesecev</h2><div class="lg-mini">${S.hide ? "" : `<i class="in"></i>Prihodki `}<i class="out"></i>Odhodki</div></div>
+    ${barChart(mk)}
   </section>
   <section class="card pad">
-    <div class="sec-h"><h2>Gibanje premoženja</h2><b>${money(totalBalance())}</b></div>
-    ${S.hide ? `<p class="muted center">Zneski so skriti.</p>` : worthChart(mk)}
+    <div class="sec-h"><h2>Gibanje premoženja</h2><b>${wealth(totalBalance())}</b></div>
+    ${S.hide ? `<p class="muted center">Stanje je skrito.</p>` : worthChart(mk)}
   </section>`;
 }
 bind.stats = (v) => {
@@ -802,14 +818,15 @@ function viewCategories() {
   const rec = list.filter((c) => c.recurring?.enabled);
   const recSum = rec.reduce((s, c) => s + (c.recurring.amount || 0), 0);
   const budgetSum = list.reduce((s, c) => s + (c.budget || 0), 0);
+  const m$ = (v) => (type === "income" ? priv(v) : money(v)); // prihodki se ob skritem stanju skrijejo
   return `${header("Kategorije", { right: `<button class="icon-btn" data-new aria-label="Nova kategorija">${icon("circle-plus")}</button>` })}
   <div class="seg">
     <button class="${type === "expense" ? "on" : ""}" data-ct="expense">${icon("arrow-up-right", 16)} Odhodki</button>
     <button class="${type === "income" ? "on" : ""}" data-ct="income">${icon("arrow-down-left", 16)} Prihodki</button>
   </div>
   <div class="kpis two">
-    <div class="kpi"><span class="ki gold">${icon("repeat", 18)}</span><small>${type === "expense" ? "Naročnine" : "Redni prihodki"} (${rec.length})</small><b>${money(recSum)}<em> / mes</em></b></div>
-    <div class="kpi"><span class="ki">${icon(type === "expense" ? "target" : "coins", 18)}</span><small>${type === "expense" ? "Mesečni proračun" : "Ta mesec prejeto"}</small><b>${type === "expense" ? (budgetSum ? money(budgetSum) : "—") : money(Object.values(spend).reduce((a, b) => a + b, 0))}</b></div>
+    <div class="kpi"><span class="ki gold">${icon("repeat", 18)}</span><small>${type === "expense" ? "Naročnine" : "Redni prihodki"} (${rec.length})</small><b>${m$(recSum)}<em> / mes</em></b></div>
+    <div class="kpi"><span class="ki">${icon(type === "expense" ? "target" : "coins", 18)}</span><small>${type === "expense" ? "Mesečni proračun" : "Ta mesec prejeto"}</small><b>${type === "expense" ? (budgetSum ? money(budgetSum) : "—") : m$(Object.values(spend).reduce((a, b) => a + b, 0))}</b></div>
   </div>
   ${list.length ? `<div class="card list">${list.map((c) => {
     const s = spend[c.id] || 0; const pct = c.budget ? Math.min(100, Math.round((s / c.budget) * 100)) : 0;
@@ -817,10 +834,10 @@ function viewCategories() {
     return `<button class="cat-row" data-cat="${c.id}">
       <span class="bubble" style="--c:${c.color}">${icon(c.icon, 20)}</span>
       <span class="grow">
-        <b>${esc(c.name)} ${r ? `<span class="badge gold">${icon("repeat", 12)} ${money(r.amount)} · ${r.day}.</span>` : ""}</b>
+        <b>${esc(c.name)} ${r ? `<span class="badge gold">${icon("repeat", 12)} ${m$(r.amount)} · ${r.day}.</span>` : ""}</b>
         ${c.budget ? `<span class="bar"><i class="${s > c.budget ? "over" : s > c.budget * 0.8 ? "warn" : ""}" style="width:${pct}%;${s <= c.budget * 0.8 ? `background:${c.color}` : ""}"></i></span>
           <small class="muted">${money(s)} od ${money(c.budget)}${s > c.budget ? ` · presežek ${money(s - c.budget)}` : ` · ostane ${money(c.budget - s)}`}</small>`
-        : `<small class="muted">Ta mesec: ${money(s)}</small>`}
+        : `<small class="muted">Ta mesec: ${m$(s)}</small>`}
       </span>
       ${icon("chevron-right", 18, "muted")}
     </button>`;
@@ -939,13 +956,13 @@ function viewAccounts() {
     return `<button class="acc-row" data-acc="${a.id}">
       <span class="bubble" style="--c:${a.color || "#F5B83D"}">${icon(ACC_TYPES[a.type]?.icon || "wallet", 20)}</span>
       <span class="grow"><b>${esc(a.name)}</b><small class="muted">${ACC_TYPES[a.type]?.label || ""} · ${cnt} transakcij${a.includeInTotal === false ? " · ni v skupnem" : ""}</small></span>
-      <b class="${(b[a.id] || 0) < 0 ? "neg" : ""}">${money(b[a.id] || 0)}</b>
+      <b class="${(b[a.id] || 0) < 0 && !S.hide ? "neg" : ""}">${wealth(b[a.id] || 0)}</b>
     </button>`;
   };
   return `${header("Viri financ", { right: `<button class="icon-btn" data-new aria-label="Nov vir">${icon("circle-plus")}</button>` })}
   <section class="hero slim">
-    <div class="hero-top"><span>Skupaj na vseh virih</span></div>
-    <div class="hero-amt">${money(totalBalance())}</div>
+    <div class="hero-top"><span>Skupaj na vseh virih</span><button class="icon-btn sm glass" data-hide aria-label="Skrij stanje">${icon(S.hide ? "eye-off" : "eye", 18)}</button></div>
+    <div class="hero-amt">${wealth(totalBalance())}</div>
   </section>
   <div class="actions">
     <button class="act" data-new>${icon("plus", 20)}<span>Nov vir</span></button>
@@ -963,6 +980,7 @@ bind.accounts = (v) => {
     txSheet(null, { type: "transfer" });
   };
   $("[data-adjust]", v).onclick = () => adjustSheet();
+  $("[data-hide]", v).onclick = toggleHide;
 };
 function accountSheet(a = null) {
   const st = { type: a?.type || "bank", color: a?.color || COLORS[(S.accounts.length * 3) % COLORS.length] };
@@ -976,7 +994,7 @@ function accountSheet(a = null) {
       <h4 class="sec-t">Barva</h4>
       <div class="swatches">${COLORS.map((c) => `<button type="button" class="sw" data-col="${c}" style="--c:${c}" aria-label="${c}"></button>`).join("")}</div>
       <label class="field"><span>Začetno stanje</span><div class="money-in"><input id="a-init" inputmode="decimal" value="${amountInput(a?.initial)}" placeholder="0,00"><span>${currency()}</span></div>
-        <small class="muted">Koliko je bilo na viru, ko si ga dodal. Ne zapiše se v zgodovino.${a ? ` Trenutno stanje: <b>${money(bal, { hide: false })}</b>` : ""}</small></label>
+        <small class="muted">Koliko je bilo na viru, ko si ga dodal. Ne zapiše se v zgodovino.${a ? ` Trenutno stanje: <b>${wealth(bal)}</b>` : ""}</small></label>
       <div class="toggle-row"><span class="grow"><b>Upoštevaj v skupnem stanju</b><small class="muted">Izklopi npr. za dolgoročne naložbe</small></span><label class="switch"><input type="checkbox" id="a-incl" ${a?.includeInTotal === false ? "" : "checked"}><i></i></label></div>
       ${a ? `<div class="toggle-row"><span class="grow"><b>Arhiviraj</b><small class="muted">Skrij vir, zgodovina ostane</small></span><label class="switch"><input type="checkbox" id="a-arch" ${a.archived ? "checked" : ""}><i></i></label></div>
         <a class="btn ghost block" href="#/transactions" data-hist>${icon("receipt", 18)} Transakcije tega vira</a>` : ""}`,
@@ -1014,12 +1032,13 @@ function adjustSheet() {
   openSheet({
     title: "Popravi stanje",
     body: `<p class="muted">Vpiši dejansko stanje (npr. po bančnem izpisku). Razlika se zapiše kot popravek in se ne šteje med prihodke ali odhodke.</p>
-      <label class="field"><span>Vir</span><select id="ad-acc">${accs.map((a) => `<option value="${a.id}">${esc(a.name)} – ${money(b[a.id] || 0, { hide: false })}</option>`).join("")}</select></label>
+      <label class="field"><span>Vir</span><select id="ad-acc">${accs.map((a) => `<option value="${a.id}">${esc(a.name)} – ${wealth(b[a.id] || 0)}</option>`).join("")}</select></label>
       <label class="field"><span>Dejansko stanje</span><div class="money-in"><input id="ad-amt" inputmode="decimal" placeholder="0,00"><span>${currency()}</span></div></label>`,
     footer: `<button class="btn primary grow" data-save>${icon("check", 18)} Popravi</button>`,
     onMount: (r) => {
-      $("#ad-amt", r).value = amountInput(b[accs[0].id] || 0);
-      $("#ad-acc", r).onchange = (e) => ($("#ad-amt", r).value = amountInput(b[e.target.value] || 0));
+      const pre = (id) => (S.hide ? "" : amountInput(b[id] || 0));
+      $("#ad-amt", r).value = pre(accs[0].id);
+      $("#ad-acc", r).onchange = (e) => ($("#ad-amt", r).value = pre(e.target.value));
       $("[data-save]", r).onclick = () => {
         const id = $("#ad-acc", r).value; const target = parseAmount($("#ad-amt", r).value);
         if (isNaN(target)) return toast("Vpiši znesek.", "error");
@@ -1050,12 +1069,17 @@ function viewSettings() {
   <div class="card list">
     ${item("user", "Ime", esc(p.name || "—"), "data-name")}
     ${item("coins", "Valuta", currency(), "data-cur")}
-    ${S.be.mode === "firebase" || S.be.mode === "local" ? item("key-round", "Spremeni geslo", "", "data-pw") : ""}
+  </div>
+  <h4 class="sec-t">Varnost</h4>
+  <div class="card list">
+    ${item("lock-keyhole", "Spremeni PIN", `${S.secure?.pin?.len || 4}-mestna koda za prikaz stanja`, "data-pin")}
+    <div class="set-row" id="bio-row" hidden><span class="bubble sm" style="--c:var(--ink-2)">${icon("scan-face", 18)}</span><span class="grow"><b>Face ID / prstni odtis</b><small class="muted">Odklepanje z biometrijo na tej napravi</small></span><label class="switch"><input type="checkbox" id="s-bio" ${LS.get(bioKey(), null) ? "checked" : ""}><i></i></label></div>
+    ${item("key-round", "Spremeni geslo", "Geslo za prijavo", "data-pw")}
   </div>
   <h4 class="sec-t">Videz</h4>
   <div class="card pad">
     <div class="seg">${[["dark", "Temna", "moon"], ["light", "Svetla", "sun"], ["system", "Sistem", "monitor"]].map(([k, l, ic]) => `<button class="${theme === k ? "on" : ""}" data-theme="${k}">${icon(ic, 16)} ${l}</button>`).join("")}</div>
-    <div class="toggle-row flat"><span class="grow"><b>Skrij zneske</b><small class="muted">Za uporabo na javnih mestih</small></span><label class="switch"><input type="checkbox" id="s-hide" ${S.hide ? "checked" : ""}><i></i></label></div>
+    <div class="toggle-row flat"><span class="grow"><b>Skrij stanje</b><small class="muted">Skrije stanje in prihodke, odhodki ostanejo vidni. Prikaz zahteva PIN.</small></span><label class="switch"><input type="checkbox" id="s-hide" ${S.hide ? "checked" : ""}><i></i></label></div>
   </div>
   <h4 class="sec-t">Podatki</h4>
   <div class="card list">
@@ -1075,7 +1099,17 @@ function viewSettings() {
 bind.settings = (v) => {
   $("[data-go]", v)?.addEventListener("click", () => (location.hash = "#/admin"));
   $$("[data-theme]", v).forEach((b) => (b.onclick = () => { LS.set("theme", b.dataset.theme); applyTheme(b.dataset.theme); persist(S.be.setProfile({ theme: b.dataset.theme })); rerender(); }));
-  $("#s-hide", v).onchange = (e) => { S.hide = e.target.checked; LS.set("hide", S.hide); };
+  $("#s-hide", v).onchange = (e) => {
+    if (e.target.checked) { S.hide = true; LS.set("hide", true); return; }
+    e.target.checked = true; requestUnhide(); // prikaz zahteva PIN ali biometrijo
+  };
+  $("[data-pin]", v).onclick = () => changePinSheet();
+  const bioSw = $("#s-bio", v);
+  bioSupported().then((ok) => { if (ok) $("#bio-row", v)?.removeAttribute("hidden"); });
+  if (bioSw) bioSw.onchange = (e) => {
+    if (!e.target.checked) { LS.set(bioKey(), null); toast("Biometrija izklopljena na tej napravi."); return; }
+    e.target.checked = false; enableBioSheet();
+  };
   $("[data-name]", v).onclick = () => openSheet({
     title: "Ime", body: `<label class="field"><span>Ime</span><input id="n" value="${esc(S.profile.name || "")}" maxlength="40"></label>`,
     footer: `<button class="btn primary grow" data-s>Shrani</button>`,
@@ -1106,7 +1140,7 @@ bind.settings = (v) => {
     if (!(await confirmBox("Izbriši vse podatke?", "Izbrisani bodo vsi viri, kategorije in transakcije. Priporočamo, da najprej preneseš varnostno kopijo.", "Izbriši vse"))) return;
     try {
       await S.be.deleteAll(); await S.be.setProfile({ onboarded: false });
-      Object.assign(S, { accounts: [], categories: [], transactions: [] }); S.profile.onboarded = false;
+      Object.assign(S, { accounts: [], categories: [], transactions: [], secure: {} }); S.profile.onboarded = false;
       toast("Podatki izbrisani."); renderOnboarding();
     } catch (e) { toast(errorText(e), "error"); }
   };
@@ -1271,11 +1305,229 @@ function userSheet(u) {
 }
 
 // ═════════════════════════════════════════════════════════════
+//  PIN + BIOMETRIJA (prikaz skritega stanja)
+// ═════════════════════════════════════════════════════════════
+const PIN_MAX_FAILS = 5, PIN_LOCK_MS = 60000;
+const b64u = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64u = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+async function pinHash(pin, salt) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(pin), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: new TextEncoder().encode("cekin-pin:" + salt), iterations: 210000, hash: "SHA-256" }, key, 256);
+  return b64u(bits);
+}
+const checkPin = async (pin) => (await pinHash(pin, S.secure.pin.salt)) === S.secure.pin.hash;
+async function savePin(pin) {
+  const salt = b64u(crypto.getRandomValues(new Uint8Array(16)));
+  const obj = { hash: await pinHash(pin, salt), salt, len: pin.length, updatedAt: Date.now() };
+  await S.be.setSecure({ pin: obj });
+  S.secure = { ...(S.secure || {}), pin: obj };
+}
+const weakPin = (p) => /^(\d)\1+$/.test(p) || "01234567890".includes(p) || "09876543210".includes(p);
+function lockedFor() { const f = LS.get("pinFails", { n: 0, until: 0 }); const s = Math.ceil((f.until - Date.now()) / 1000); return s > 0 ? s : 0; }
+function addFail() {
+  const f = LS.get("pinFails", { n: 0, until: 0 }); f.n++;
+  if (f.n >= PIN_MAX_FAILS) { f.until = Date.now() + PIN_LOCK_MS; f.n = 0; LS.set("pinFails", f); return `Preveč napačnih poskusov. Poskusi znova čez ${PIN_LOCK_MS / 1000} s.`; }
+  LS.set("pinFails", f); return `Napačen PIN. Še ${PIN_MAX_FAILS - f.n} ${PIN_MAX_FAILS - f.n === 1 ? "poskus" : "poskusi"}.`;
+}
+const clearFails = () => LS.set("pinFails", { n: 0, until: 0 });
+
+// ── tipkovnica ───────────────────────────────────────────────
+function pinPadHTML({ title, sub, len, bio = false, extra = "" }) {
+  return `<div class="pinpad" data-len="${len}">
+    <div class="pin-head"><span class="bubble lg" style="--c:var(--gold)">${icon("lock-keyhole", 26)}</span><h2>${title}</h2><p class="muted" data-sub>${sub}</p></div>
+    <div class="pin-dots">${"<i></i>".repeat(len)}</div>
+    <p class="pin-err" data-err></p>
+    <div class="keys">
+      ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map((n) => `<button type="button" data-k="${n}">${n}</button>`).join("")}
+      ${bio ? `<button type="button" class="kfn" data-bio aria-label="Biometrija">${icon("scan-face", 28)}</button>` : "<span></span>"}
+      <button type="button" data-k="0">0</button>
+      <button type="button" class="kfn" data-del aria-label="Izbriši">${icon("delete", 26)}</button>
+    </div>${extra}
+  </div>`;
+}
+function bindPinPad(root, { onComplete, onBio }) {
+  const pad = $(".pinpad", root); const len = +pad.dataset.len; let val = ""; let busy = false;
+  const dots = () => $$(".pin-dots i", root).forEach((d, i) => d.classList.toggle("on", i < val.length));
+  const fail = (msg) => {
+    const d = $(".pin-dots", root); d.classList.remove("shake"); void d.offsetWidth; d.classList.add("shake");
+    $("[data-err]", root).textContent = msg || ""; setTimeout(() => { val = ""; dots(); }, 280);
+  };
+  const press = async (k) => {
+    if (busy) return;
+    if (k === "del") val = val.slice(0, -1); else if (val.length < len) val += k;
+    dots(); if (k !== "del") $("[data-err]", root).textContent = "";
+    if (val.length === len) {
+      busy = true; const res = await onComplete(val); busy = false;
+      if (res !== true) fail(typeof res === "string" ? res : "");
+    }
+  };
+  $$("[data-k]", root).forEach((b) => (b.onclick = () => press(b.dataset.k)));
+  $("[data-del]", root).onclick = () => press("del");
+  if (onBio) $("[data-bio]", root)?.addEventListener("click", onBio);
+  const onKey = (e) => {
+    if (!document.body.contains(pad)) return document.removeEventListener("keydown", onKey);
+    if (e.target.matches?.("input, textarea, select")) return;
+    if (/^\d$/.test(e.key)) press(e.key); else if (e.key === "Backspace") press("del");
+  };
+  document.addEventListener("keydown", onKey);
+}
+// nastavitev novega PIN-a (izbira 4/6, vnos, ponovitev)
+function pinSetupFlow(root, onDone) {
+  let len = S.secure?.pin?.len || 4, first = null;
+  const render = () => {
+    root.innerHTML = (first ? "" : `<div class="seg sm pin-len"><button type="button" data-l="4" class="${len === 4 ? "on" : ""}">4 števke</button><button type="button" data-l="6" class="${len === 6 ? "on" : ""}">6 števk</button></div>`)
+      + pinPadHTML({ title: first ? "Ponovi PIN" : "Nastavi PIN", sub: first ? "Za potrditev vnesi PIN še enkrat." : `Izberi ${len}-mestno kodo.`, len });
+    $$("[data-l]", root).forEach((b) => (b.onclick = () => { len = +b.dataset.l; render(); }));
+    bindPinPad(root, {
+      onComplete: async (pin) => {
+        if (!first) { if (weakPin(pin)) return "Koda je preveč predvidljiva. Izberi drugo."; first = pin; render(); return true; }
+        if (pin !== first) { first = null; render(); $("[data-err]", root).textContent = "Kodi se ne ujemata. Začni znova."; return true; }
+        try { await savePin(pin); clearFails(); onDone(); } catch (e) { toast(errorText(e), "error"); first = null; render(); }
+        return true;
+      }
+    });
+  };
+  render();
+}
+function renderPinSetup() {
+  $("#app").innerHTML = `<div class="pin-screen">
+    <div class="pin-top"><div class="logo-mark sm">${logoSvg()}</div><b>${APP_NAME}</b></div>
+    <div id="pin-root"></div>
+    <p class="muted tiny center pin-note">${icon("shield-check", 14)} PIN potrebuješ za prikaz skritega stanja. Shrani se samo zgoščen in ga ne vidi nihče, tudi skrbnik ne.</p>
+  </div>`;
+  pinSetupFlow($("#pin-root"), () => { toast("PIN je nastavljen."); route(); bioSupported().then((ok) => ok && !LS.get(bioKey(), null) && enableBioSheet(true)); });
+}
+
+// ── biometrija (WebAuthn, vgrajen avtentikator naprave) ─────
+const bioKey = () => "bio:" + (S.user?.uid || "");
+const bioOn = () => !!LS.get(bioKey(), null) && !!window.PublicKeyCredential;
+async function bioSupported() {
+  try { return window.isSecureContext && !!window.PublicKeyCredential && (await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); } catch { return false; }
+}
+async function bioRegister() {
+  const cred = await navigator.credentials.create({ publicKey: {
+    challenge: crypto.getRandomValues(new Uint8Array(32)),
+    rp: { name: APP_NAME, id: location.hostname },
+    user: { id: new TextEncoder().encode(S.user.uid), name: S.user.email, displayName: S.profile.name || S.user.email },
+    pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
+    authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required", residentKey: "discouraged" },
+    timeout: 60000, attestation: "none"
+  } });
+  LS.set(bioKey(), b64u(cred.rawId));
+}
+async function bioVerify(silent = false) {
+  const id = LS.get(bioKey(), null); if (!id) return false;
+  try {
+    const a = await navigator.credentials.get({ publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)), rpId: location.hostname,
+      allowCredentials: [{ type: "public-key", id: unb64u(id) }], userVerification: "required", timeout: 60000
+    } });
+    return !!(new Uint8Array(a.response.authenticatorData)[32] & 0x04); // zastavica UV = uporabnik preverjen
+  } catch { if (!silent) toast("Biometrično preverjanje ni uspelo. Vnesi PIN.", "error"); return false; }
+}
+function enableBioSheet(afterSetup = false) {
+  const grant = (r) => {
+    $(".sheet-body", r).innerHTML = `<div class="empty">${icon("scan-face", 44)}<h3>Face ID / prstni odtis</h3><p class="muted">Stanje boš lahko prikazal z biometrijo te naprave namesto s PIN-om. Biometrični podatki ne zapustijo naprave.</p></div>`;
+    $(".sheet-foot", r).innerHTML = `<button class="btn ghost" data-close>${afterSetup ? "Preskoči" : "Prekliči"}</button><button class="btn primary grow" data-on>${icon("fingerprint", 18)} Vklopi</button>`;
+    $(".sheet-foot [data-close]", r).onclick = closeSheet;
+    $("[data-on]", r).onclick = async () => {
+      try { await bioRegister(); closeSheet(); toast("Biometrija vklopljena na tej napravi."); rerender(); }
+      catch { toast("Biometrije ni bilo mogoče vklopiti.", "error"); }
+    };
+  };
+  openSheet({
+    title: "Biometrija", body: afterSetup ? "" : `<div id="pin-root"></div>`, footer: "<span></span>",
+    onMount: (r) => {
+      if (afterSetup) return grant(r); // PIN je bil pravkar nastavljen
+      const root = $("#pin-root", r);
+      root.innerHTML = pinPadHTML({ title: "Potrdi s PIN-om", sub: "Za vklop biometrije vnesi PIN.", len: S.secure.pin.len });
+      bindPinPad(root, { onComplete: async (pin) => {
+        const l = lockedFor(); if (l) return `Preveč poskusov. Poskusi čez ${l} s.`;
+        if (await checkPin(pin)) { clearFails(); grant(r); return true; }
+        return addFail();
+      } });
+    }
+  });
+}
+
+// ── prikaz / skrivanje ───────────────────────────────────────
+function toggleHide() {
+  if (S.hide) return requestUnhide();
+  S.hide = true; LS.set("hide", true); rerender(); // skrivanje ne zahteva kode
+}
+function requestUnhide() {
+  if (!S.secure?.pin) return renderPinSetup();
+  const bio = bioOn();
+  const done = () => { S.hide = false; LS.set("hide", false); clearFails(); closeSheet(); rerender(); };
+  openSheet({
+    title: "Prikaži stanje", body: `<div id="pin-root"></div>`,
+    onMount: (r) => {
+      const root = $("#pin-root", r);
+      root.innerHTML = pinPadHTML({ title: "Vnesi PIN", sub: bio ? "ali uporabi Face ID / prstni odtis" : "za prikaz stanja", len: S.secure.pin.len, bio,
+        extra: `<button type="button" class="link" data-forgot>Pozabljen PIN?</button>` });
+      bindPinPad(root, {
+        onComplete: async (pin) => {
+          const l = lockedFor(); if (l) return `Preveč poskusov. Poskusi čez ${l} s.`;
+          if (await checkPin(pin)) { done(); return true; }
+          return addFail();
+        },
+        onBio: async () => { if (await bioVerify()) done(); }
+      });
+      $("[data-forgot]", root).onclick = forgotPin;
+      if (bio) bioVerify(true).then((ok) => ok && done()); // takoj ponudi biometrijo (še v okviru klika)
+    }
+  });
+}
+function changePinSheet(skipOld = false) {
+  openSheet({
+    title: "Spremeni PIN", body: `<div id="pin-root"></div>`,
+    onMount: (r) => {
+      const root = $("#pin-root", r);
+      const setup = () => pinSetupFlow(root, () => { closeSheet(); toast("PIN je spremenjen."); rerender(); });
+      if (skipOld) return setup();
+      root.innerHTML = pinPadHTML({ title: "Trenutni PIN", sub: "Najprej vnesi trenutni PIN.", len: S.secure.pin.len, extra: `<button type="button" class="link" data-forgot>Pozabljen PIN?</button>` });
+      bindPinPad(root, { onComplete: async (pin) => {
+        const l = lockedFor(); if (l) return `Preveč poskusov. Poskusi čez ${l} s.`;
+        if (await checkPin(pin)) { clearFails(); setup(); return true; }
+        return addFail();
+      } });
+      $("[data-forgot]", root).onclick = forgotPin;
+    }
+  });
+}
+function forgotPin() {
+  openSheet({
+    title: "Pozabljen PIN",
+    body: `<p class="muted">Za nastavitev novega PIN-a vnesi geslo svojega računa.</p><label class="field"><span>Geslo računa</span><input type="password" id="fp-pw" autocomplete="current-password"></label>`,
+    footer: `<button class="btn primary grow" data-s>Naprej</button>`,
+    onMount: (r) => {
+      const go = async () => {
+        const b = $("[data-s]", r); b.disabled = true; b.classList.add("loading");
+        try { await S.be.verifyPassword($("#fp-pw", r).value); clearFails(); changePinSheet(true); }
+        catch (e) { toast(errorText(e), "error"); b.disabled = false; b.classList.remove("loading"); }
+      };
+      $("[data-s]", r).onclick = go;
+      $("#fp-pw", r).addEventListener("keydown", (e) => e.key === "Enter" && go());
+    }
+  });
+}
+
+// ═════════════════════════════════════════════════════════════
 //  PWA
 // ═════════════════════════════════════════════════════════════
 window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); S.installPrompt = e; });
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
-  window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js", { scope: "./" }).catch(() => {}));
+  // Ko je na voljo nova verzija, se aplikacija samodejno osveži.
+  const hadController = !!navigator.serviceWorker.controller; let reloading = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadController || reloading || $("#sheet-root")?.classList.contains("open")) return;
+    reloading = true; location.reload();
+  });
+  window.addEventListener("load", () => navigator.serviceWorker.register("./sw.js", { scope: "./", updateViaCache: "none" })
+    .then((reg) => {
+      reg.update().catch(() => {});
+      document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && reg.update().catch(() => {}));
+    }).catch(() => {}));
 }
 
 boot();
